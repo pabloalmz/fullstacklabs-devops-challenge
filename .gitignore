@@ -21,3 +21,10 @@
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+
+
+# Ignora os arquivos gerados pelo Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+.terraform.lock.hcl
