@@ -27,7 +27,7 @@ jobs:
         run: npm run lint
 
       - name: Run formatter
-        run: npm run prettier --write
+        run: npm run prettier . --write
 
       - name: Run tests
         env: 
