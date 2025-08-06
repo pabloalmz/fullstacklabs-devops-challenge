@@ -12,6 +12,11 @@ on:
       - stage
       - prod
 
+env:
+  BUCKET_NAME_DEVEL: 'fsl-develop-bucket-site'
+  BUCKET_NAME_STAGE: 'fsl-stage-bucket-site'
+  BUCKET_NAME_PROD: 'fsl-prod-bucket-site'
+  
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -31,6 +36,9 @@ jobs:
       - name: Run linter
         run: npm run lint
 
+      - name: Run formatter
+        run: npm run prettier --write
+
       - name: Run tests
         env:
           CI: true
@@ -38,12 +46,18 @@ jobs:
 
       - name: Build project
         run: npm run build
+        
+      - name: Archive production artifacts
+        uses: actions/upload-artifact@v2
+        with:
+          name: build-folder
+          path: build/
 
   deploy-terraform:
     needs: build
     runs-on: ubuntu-latest
     if: github.event_name == 'pull_request' && github.event.action == 'closed' && github.event.pull_request.merged == true
-    
+
     steps:
       - name: Check out code
         uses: actions/checkout@v2
@@ -58,7 +72,7 @@ jobs:
       - name: Set up Terraform
         uses: hashicorp/setup-terraform@v1
         with:
-          terraform_version: '1.0.0' # Use a versão que você prefere
+          terraform_version: '1.0.0'
 
       - name: Terraform Init
         run: terraform init -upgrade
@@ -73,8 +87,49 @@ jobs:
         if: github.ref == 'refs/heads/stage'
         run: terraform apply -var-file="stage.tfvars" -auto-approve
         working-directory: ./terraform
-        
+
       - name: Terraform Apply for Prod
         if: github.ref == 'refs/heads/prod'
         run: terraform apply -var-file="prod.tfvars" -auto-approve
         working-directory: ./terraform
+
+  deploy-s3:
+    needs: [build, deploy-terraform]
+    runs-on: ubuntu-latest
+    if: success() && github.event_name == 'push'
+
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v2
+        
+      - name: Set up Node.js
+        uses: actions/setup-node@v2
+        with:
+          node-version: '15'
+          
+      - name: Get build artifacts
+        uses: actions/download-artifact@v2
+        with:
+          name: build-folder
+          
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+
+      - name: Deploy to S3 (Devel)
+        if: github.ref == 'refs/heads/devel'
+        run: aws s3 sync ./build/ s3://${{ env.BUCKET_NAME_DEVEL }} --delete
+
+      - name: Deploy to S3 (Stage)
+        if: github.ref == 'refs/heads/stage'
+        run: aws s3 sync ./build/ s3://${{ env.BUCKET_NAME_STAGE }} --delete
+
+      - name: Deploy to S3 (Prod)
+        if: github.ref == 'refs/heads/prod'
+        run: aws s3 sync ./build/ s3://${{ env.BUCKET_NAME_PROD }} --delete
+        
+      - name: CloudFront Invalidation
+        run: aws cloudfront create-invalidation --distribution-id E14MMMTLVEP3H1 --paths '/*'
