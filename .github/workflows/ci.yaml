@@ -1,17 +1,27 @@
 name: CI Pipeline
 
-on: 
+on:
+  push:
+    branches:
+      - devel
+      - stage
+      - prod
   pull_request:
     branches:
       - devel
       - stage
       - prod
 
+env:
+  BUCKET_NAME_DEVEL: 'fsl-develop-bucket-site'
+  BUCKET_NAME_STAGE: 'fsl-stage-bucket-site'
+  BUCKET_NAME_PROD: 'fsl-prod-bucket-site'
+  
 jobs:
   build:
     runs-on: ubuntu-latest
-    
-    steps: 
+
+    steps:
       - name: Check out code
         uses: actions/checkout@v2
 
@@ -26,13 +36,93 @@ jobs:
       - name: Run linter
         run: npm run lint
 
-      - name: Run formatter
-        run: npm run prettier --write
-
       - name: Run tests
-        env: 
+        env:
           CI: true
         run: npm run test
 
       - name: Build project
         run: npm run build
+        
+      - name: Archive production artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-folder
+          path: build/
+
+  deploy-terraform:
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request' && github.event.action == 'closed' && github.event.pull_request.merged == true
+
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v2
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v1
+        with:
+          terraform_version: '1.0.0'
+
+      - name: Terraform Init
+        run: terraform init -upgrade
+        working-directory: ./terraform
+
+      - name: Terraform Apply for Devel
+        if: github.ref == 'refs/heads/devel'
+        run: terraform apply -var-file="devel.tfvars" -auto-approve
+        working-directory: ./terraform
+
+      - name: Terraform Apply for Stage
+        if: github.ref == 'refs/heads/stage'
+        run: terraform apply -var-file="stage.tfvars" -auto-approve
+        working-directory: ./terraform
+
+      - name: Terraform Apply for Prod
+        if: github.ref == 'refs/heads/prod'
+        run: terraform apply -var-file="prod.tfvars" -auto-approve
+        working-directory: ./terraform
+
+  deploy-s3:
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && success()
+
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v2
+        
+      - name: Get build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: build-folder
+          path: ./build/
+          
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+
+      - name: Deploy to S3 (Devel)
+        if: github.ref_name == 'devel'
+        run: aws s3 sync ./build/ s3://${{ env.BUCKET_NAME_DEVEL }} --delete
+
+      - name: Deploy to S3 (Stage)
+        if: github.ref_name == 'stage'
+        run: aws s3 sync ./build/ s3://${{ env.BUCKET_NAME_STAGE }} --delete
+
+      - name: Deploy to S3 (Prod)
+        if: github.ref_name == 'prod'
+        run: aws s3 sync ./build/ s3://${{ env.BUCKET_NAME_PROD }} --delete
+        
+      - name: CloudFront Invalidation
+        run: aws cloudfront create-invalidation --distribution-id E14MMMTLVEP3H1 --paths '/*'
