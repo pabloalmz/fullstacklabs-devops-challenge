@@ -91,21 +91,16 @@ jobs:
         working-directory: ./terraform
 
   deploy-s3:
-    needs: [build, deploy-terraform]
+    needs: build
     runs-on: ubuntu-latest
-    if: success() && github.event_name == 'push'
+    if: github.event_name == 'push' && success()
 
     steps:
       - name: Check out code
         uses: actions/checkout@v2
         
-      - name: Set up Node.js
-        uses: actions/setup-node@v2
-        with:
-          node-version: '15'
-          
       - name: Get build artifacts
-        uses: actions/download-artifact@v2
+        uses: actions/download-artifact@v4
         with:
           name: build-folder
           
@@ -129,4 +124,4 @@ jobs:
         run: aws s3 sync ./build/ s3://${{ env.BUCKET_NAME_PROD }} --delete
         
       - name: CloudFront Invalidation
-        run: aws cloudfront create-invalidation --distribution-id E14MMMTLVEP3H1 --paths '/*'
+        run: aws cloudfront create-invalidation --distribution-id YOUR_DISTRIBUTION_ID --paths '/*'
