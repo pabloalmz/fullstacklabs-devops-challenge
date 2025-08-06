@@ -103,6 +103,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: build-folder
+          path: ./build/
           
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v1
@@ -118,10 +119,3 @@ jobs:
       - name: Deploy to S3 (Stage)
         if: github.ref == 'refs/heads/stage'
         run: aws s3 sync ./build/ s3://${{ env.BUCKET_NAME_STAGE }} --delete
-
-      - name: Deploy to S3 (Prod)
-        if: github.ref == 'refs/heads/prod'
-        run: aws s3 sync ./build/ s3://${{ env.BUCKET_NAME_PROD }} --delete
-        
-      - name: CloudFront Invalidation
-        run: aws cloudfront create-invalidation --distribution-id YOUR_DISTRIBUTION_ID --paths '/*'
