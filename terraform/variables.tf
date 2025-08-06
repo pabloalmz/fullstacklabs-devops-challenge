@@ -1,5 +1,5 @@
-# In this file put the variables related to the deployment
-variable "variable_name" {
-    type = "type",
-    description = "Description"
+variable "bucket_name" {}
+variable "cloudfront_comment" {}
+variable "region" {
+  default = "us-east-1"
 }
