@@ -31,6 +31,9 @@ jobs:
       - name: Run linter
         run: npm run lint
 
+      - name: Run formatter
+        run: npm run prettier --write
+
       - name: Run tests
         env:
           CI: true
@@ -38,3 +41,43 @@ jobs:
 
       - name: Build project
         run: npm run build
+
+  deploy-terraform:
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request' && github.event.action == 'closed' && github.event.pull_request.merged == true
+    
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v2
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v1
+        with:
+          terraform_version: '1.0.0' # Use a versão que você prefere
+
+      - name: Terraform Init
+        run: terraform init -upgrade
+        working-directory: ./terraform
+
+      - name: Terraform Apply for Devel
+        if: github.ref == 'refs/heads/devel'
+        run: terraform apply -var-file="devel.tfvars" -auto-approve
+        working-directory: ./terraform
+
+      - name: Terraform Apply for Stage
+        if: github.ref == 'refs/heads/stage'
+        run: terraform apply -var-file="stage.tfvars" -auto-approve
+        working-directory: ./terraform
+        
+      - name: Terraform Apply for Prod
+        if: github.ref == 'refs/heads/prod'
+        run: terraform apply -var-file="prod.tfvars" -auto-approve
+        working-directory: ./terraform
